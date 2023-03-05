@@ -7,7 +7,7 @@ Copy `celnet.c` and `celnet.h` into your project. Make sure to link `pthread` to
 ## Usage
 You instantiate an server info struct using `create_server_defaults()`. This will set everything up to run on a random port on your local machine. Then optionally you can define handlers for the function pointers defined in the struct. Pass this server definition into `server_listen_and_serve(definition)` and voila, you're up and running.
 
-*NOTE*: You do not have to `free` the data being passed into the handlers (neither the connection handler, nor the options handlers), the server will take care of that itself.
+**NOTE**: You do not have to `free` the data being passed into the handlers (neither the connection handler, nor the options handlers), the server will take care of that itself.
 
 Here's a simple example:
 ```c
