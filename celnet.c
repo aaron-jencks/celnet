@@ -1,17 +1,11 @@
 #include "celnet.h"
-#include <stdint.h>
-#include <stddef.h>
-#include <netinet/in.h>
-#include <netinet/ip.h>
-#include <sys/types.h>
-#include <sys/socket.h>
+#include <stdlib.h>
 #include <pthread.h>
 #include <errno.h>
 #include <string.h>
+#include <arpa/inet.h>
 
-typedef struct sockaddr_in sockaddr_t;
-
-const char IAC=255, WILL=251, WONT=252, DO=253, DONT=254;
+const uint8_t IAC=255, WILL=251, WONT=252, DO=253, DONT=254;
 
 /**
  * A mapping of option handlers,
@@ -33,7 +27,7 @@ option_handler_t option_handlers[256];
 server_def_t create_server_defaults() {
     sockaddr_t address;
     address.sin_family = AF_INET;
-    address.sin_addr = INADDR_ANY;
+    address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = 0;
     server_def_t result = {
         address, 1024, 1, 10,
@@ -44,10 +38,10 @@ server_def_t create_server_defaults() {
 
 typedef struct {
     int connfd;
-    sock_addr_t* addr;
+    sockaddr_t* addr;
     socklen_t* addr_len;
     size_t buffer_size;
-    void (*user_connection_handler)(int, sockaddr_t*, socklen_t*, char*, size_t);
+    void (*user_connection_handler)(int, sockaddr_t*, socklen_t, char*, size_t);
 } connection_handler_args_t;
 
 
@@ -63,18 +57,18 @@ void* connection_handler(void* args) {
 
     // Used for parsing telnet commands
     char* pbuffer = malloc(sizeof(char)*cargs->buffer_size);
-    if (!pbuffer) return;
+    if (!pbuffer) return NULL;
     size_t pbuffer_count = 0;
     size_t pbuffer_size = cargs->buffer_size;
 
     // The actual receiving buffer
     char* rbuffer = malloc(sizeof(char)*cargs->buffer_size);
-    if (!rbuffer) return;
+    if (!rbuffer) return NULL;
 
     for (;;) {
         IAC_LOOP_START:
         // Get some data
-        ssize_t rbuff = recv(cargs->connfd, (void*)rbuffer, sizeof(char)*cargs->buffer_size, NULL);
+        ssize_t rbuff = recv(cargs->connfd, (void*)rbuffer, sizeof(char)*cargs->buffer_size, 0);
         if (rbuff < 0) break;
         if (!rbuff) continue;
 
@@ -107,29 +101,30 @@ void* connection_handler(void* args) {
         for (ssize_t ri = start_offset; ri < rbuff; ri++) {
             if (rbuffer[ri] == IAC) {
                 if (last_start < ri && cargs->user_connection_handler) {
-                    size_t len = ri - last_start
+                    size_t len = ri - last_start;
                     char* interbuff = malloc(sizeof(char) * len);
                     if (!interbuff) goto EXIT_HANDLE;
                     memcpy(interbuff, rbuffer+last_start, sizeof(char) * len);
-                    cargs->user_connection_handler(cargs->connfd, cargs->addr, interbuff, len);
+                    cargs->user_connection_handler(cargs->connfd, cargs->addr, sizeof(cargs->addr), interbuff, len);
                     free(interbuff);
                 }
 
                 // Handle the command byte
-                char response[3];
+                char response[3] = {IAC, 0, 0};
                 int err;
-                switch(rbuffer[++ri]) {
-                    case WILL:
+                switch((uint8_t)rbuffer[++ri]) {
+                    case 251: // WILL
                         char can = WONT;
                         if (option_handlers[rbuffer[ri+1]]) {
                             can = WILL;
                         }
-                        response = {IAC, can, rbuffer[ri+1]};
-                        err = send(cargs->connfd, (void*)response, sizeof(char)*3, NULL);
+                        response[1] = can;
+                        response[2] = rbuffer[ri+1];
+                        err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
                         if (err < 0) goto EXIT_HANDLE;
                         last_start = ++ri + 1;
                         break;
-                    case DO:
+                    case 253: // DO
                         if (option_handlers[rbuffer[ri+1]]) {
                             size_t skip_len = option_handlers[rbuffer[ri+1]](cargs->connfd, rbuffer, rbuff, ri+1);
                             if (skip_len < 0) {
@@ -147,8 +142,9 @@ void* connection_handler(void* args) {
                             last_start = ri;
                             continue;
                         } else {
-                            response = {IAC, DONT, rbuffer[ri+1]};
-                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, NULL);
+                            response[1] = DONT;
+                            response[2] = rbuffer[ri+1];
+                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
                             if (err < 0) goto EXIT_HANDLE;
                             last_start = ++ri + 1;
                             break;
@@ -171,8 +167,9 @@ void* connection_handler(void* args) {
                             last_start = ri;
                             continue;
                         } else {
-                            response = {IAC, DONT, rbuffer[ri]};
-                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, NULL);
+                            response[1] = DONT;
+                            response[2] = rbuffer[ri];
+                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
                             if (err < 0) goto EXIT_HANDLE;
                             last_start = ++ri + 1;
                             break;
@@ -185,7 +182,6 @@ void* connection_handler(void* args) {
     EXIT_HANDLE:
     if (pbuffer) free(pbuffer);
     if (rbuffer) free(rbuffer);
-    close(cargs->connfd);
 }
 
 
@@ -195,20 +191,20 @@ void server_listen_and_serve(server_def_t definition) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return; // There was an error
     if (definition.options_callback) definition.options_callback(sockfd);
-    if (bind(sockfd, &definition.address, sizeof(definition.address))) return;
+    if (bind(sockfd, (struct sockaddr*)&definition.address, sizeof(definition.address))) return;
     if (listen(sockfd, definition.backlog)) return;
 
     // Begin the loop
     for (;;) {
-        sockaddr_t* caddr = malloc(sizeof(sockaddr_t));
+        struct sockaddr_in* caddr = malloc(sizeof(struct sockaddr_in));
         if (!caddr) return;
         socklen_t* caddr_len = malloc(sizeof(socklen_t));
         if (!caddr_len) return;
-        int csock = accept(sockfd, caddr, caddr_len);
+        int csock = accept(sockfd, (struct sockaddr*)caddr, caddr_len);
         if (csock < 0) return;
         connection_handler_args_t* cargs = malloc(sizeof(connection_handler_args_t));
         if (!cargs) return;
-        *cargs = {csock, caddr, caddr_len, definition.buffer_size, definition.connection_handler};
+        *cargs = (connection_handler_args_t){csock, (struct sockaddr*)caddr, caddr_len, definition.buffer_size, definition.connection_handler};
 
         pthread_t cthread;
         int cret;
