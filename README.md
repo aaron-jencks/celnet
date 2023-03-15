@@ -17,7 +17,7 @@ server_listen_and_serve(definition);
 
 Here's a real world example:
 ```c
-void echo_handler(int sock, sockaddr_t* addr, socklen_t* addr_len, char* data, size_t data_len) {
+void echo_handler(int sock, sockaddr_t* addr, socklen_t addr_len, char* data, size_t data_len) {
     printf("%s\n", data);
     send(sock, (void*)data, data_len, NULL);
 }
