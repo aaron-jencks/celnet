@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <sys/types.h>
 #include <sys/socket.h>
+#include <arpa/inet.h>
 #include "../../celnet.h"
 
 void echo_handler(int sock, sockaddr_t* addr, socklen_t addr_len, char* data, size_t data_len) {
@@ -10,7 +11,7 @@ void echo_handler(int sock, sockaddr_t* addr, socklen_t addr_len, char* data, si
 
 void main() {
     server_def_t definition = create_server_defaults();
-    definition.address.sin_port = 23;
+    definition.address.sin_port = htons(23);
     definition.connection_handler = echo_handler;
     server_listen_and_serve(definition);
 }

@@ -4,6 +4,10 @@
 #include <errno.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <stdio.h>
 
 const uint8_t IAC=255, WILL=251, WONT=252, DO=253, DONT=254;
 
@@ -26,6 +30,7 @@ option_handler_t option_handlers[256];
 */
 server_def_t create_server_defaults() {
     sockaddr_t address;
+    // bzero(&address, sizeof(address))
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = htonl(INADDR_ANY);
     address.sin_port = 0;
@@ -56,19 +61,19 @@ void* connection_handler(void* args) {
     // Sets up the buffers
 
     // Used for parsing telnet commands
-    char* pbuffer = malloc(sizeof(char)*cargs->buffer_size);
+    uint8_t* pbuffer = malloc(sizeof(uint8_t)*cargs->buffer_size);
     if (!pbuffer) return NULL;
     size_t pbuffer_count = 0;
     size_t pbuffer_size = cargs->buffer_size;
 
     // The actual receiving buffer
-    char* rbuffer = malloc(sizeof(char)*cargs->buffer_size);
+    uint8_t* rbuffer = malloc(sizeof(uint8_t)*cargs->buffer_size);
     if (!rbuffer) return NULL;
 
     for (;;) {
         IAC_LOOP_START:
         // Get some data
-        ssize_t rbuff = recv(cargs->connfd, (void*)rbuffer, sizeof(char)*cargs->buffer_size, 0);
+        ssize_t rbuff = recv(cargs->connfd, (void*)rbuffer, sizeof(uint8_t)*cargs->buffer_size, 0);
         if (rbuff < 0) break;
         if (!rbuff) continue;
 
@@ -76,20 +81,20 @@ void* connection_handler(void* args) {
         // for a command
         size_t start_offset = 0;
         if (pbuffer_count) {
-            char* interbuff = malloc(sizeof(char) * (pbuffer_count + rbuff));
+            uint8_t* interbuff = malloc(sizeof(uint8_t) * (pbuffer_count + rbuff));
             if (!interbuff) break;
-            memcpy(interbuff, pbuffer, sizeof(char)*pbuffer_count);
-            memcpy(interbuff+pbuffer_count, rbuffer, sizeof(char)*rbuff);
+            memcpy(interbuff, pbuffer, sizeof(uint8_t)*pbuffer_count);
+            memcpy(interbuff+pbuffer_count, rbuffer, sizeof(uint8_t)*rbuff);
             size_t distance = option_handlers[interbuff[0]](cargs->connfd, interbuff, pbuffer_count+rbuff, 0);
             free(interbuff);
             if (distance < 0) {
                 size_t new_size = pbuffer_count + rbuff;
                 if (new_size > pbuffer_size) {
                     pbuffer_size = new_size + 10;
-                    pbuffer = realloc(pbuffer, sizeof(char)*new_size);
+                    pbuffer = realloc(pbuffer, sizeof(uint8_t)*new_size);
                     if (!pbuffer) break;
                 }
-                memcpy(pbuffer+pbuffer_count, rbuffer, sizeof(char)*rbuff);
+                memcpy(pbuffer+pbuffer_count, rbuffer, sizeof(uint8_t)*rbuff);
                 pbuffer_count += rbuff;
                 continue;
             }
@@ -102,25 +107,25 @@ void* connection_handler(void* args) {
             if (rbuffer[ri] == IAC) {
                 if (last_start < ri && cargs->user_connection_handler) {
                     size_t len = ri - last_start;
-                    char* interbuff = malloc(sizeof(char) * len);
+                    char* interbuff = malloc(sizeof(uint8_t) * len);
                     if (!interbuff) goto EXIT_HANDLE;
-                    memcpy(interbuff, rbuffer+last_start, sizeof(char) * len);
+                    memcpy(interbuff, rbuffer+last_start, sizeof(uint8_t) * len);
                     cargs->user_connection_handler(cargs->connfd, cargs->addr, sizeof(cargs->addr), interbuff, len);
                     free(interbuff);
                 }
 
                 // Handle the command byte
-                char response[3] = {IAC, 0, 0};
+                uint8_t response[3] = {IAC, 0, 0};
                 int err;
                 switch((uint8_t)rbuffer[++ri]) {
                     case 251: // WILL
-                        char can = WONT;
+                        uint8_t can = WONT;
                         if (option_handlers[rbuffer[ri+1]]) {
                             can = WILL;
                         }
                         response[1] = can;
                         response[2] = rbuffer[ri+1];
-                        err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
+                        err = send(cargs->connfd, (void*)response, sizeof(uint8_t)*3, 0);
                         if (err < 0) goto EXIT_HANDLE;
                         last_start = ++ri + 1;
                         break;
@@ -131,10 +136,10 @@ void* connection_handler(void* args) {
                                 size_t new_size = rbuff - (ri+1);
                                 if (new_size > pbuffer_size) {
                                     pbuffer_size = new_size + 10;
-                                    pbuffer = realloc(pbuffer, sizeof(char)*new_size);
+                                    pbuffer = realloc(pbuffer, sizeof(uint8_t)*new_size);
                                     if (!pbuffer) goto EXIT_HANDLE;
                                 }
-                                memcpy(pbuffer, rbuffer, sizeof(char)*rbuff);
+                                memcpy(pbuffer, rbuffer, sizeof(uint8_t)*rbuff);
                                 pbuffer_count = new_size;
                                 goto IAC_LOOP_START;
                             }
@@ -144,7 +149,7 @@ void* connection_handler(void* args) {
                         } else {
                             response[1] = DONT;
                             response[2] = rbuffer[ri+1];
-                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
+                            err = send(cargs->connfd, (void*)response, sizeof(uint8_t)*3, 0);
                             if (err < 0) goto EXIT_HANDLE;
                             last_start = ++ri + 1;
                             break;
@@ -156,10 +161,10 @@ void* connection_handler(void* args) {
                                 size_t new_size = rbuff - (ri);
                                 if (new_size > pbuffer_size) {
                                     pbuffer_size = new_size + 10;
-                                    pbuffer = realloc(pbuffer, sizeof(char)*new_size);
+                                    pbuffer = realloc(pbuffer, sizeof(uint8_t)*new_size);
                                     if (!pbuffer) goto EXIT_HANDLE;
                                 }
-                                memcpy(pbuffer, rbuffer, sizeof(char)*rbuff);
+                                memcpy(pbuffer, rbuffer, sizeof(uint8_t)*rbuff);
                                 pbuffer_count = new_size;
                                 goto IAC_LOOP_START;
                             }
@@ -169,7 +174,7 @@ void* connection_handler(void* args) {
                         } else {
                             response[1] = DONT;
                             response[2] = rbuffer[ri];
-                            err = send(cargs->connfd, (void*)response, sizeof(char)*3, 0);
+                            err = send(cargs->connfd, (void*)response, sizeof(uint8_t)*3, 0);
                             if (err < 0) goto EXIT_HANDLE;
                             last_start = ++ri + 1;
                             break;
@@ -177,9 +182,19 @@ void* connection_handler(void* args) {
                 }
             }
         }
+        if (last_start < rbuff && cargs->user_connection_handler) {
+            // There was data at the end that weren't part of a command
+            size_t len = rbuff - last_start;
+            char* interbuff = malloc(sizeof(uint8_t) * len);
+            if (!interbuff) goto EXIT_HANDLE;
+            memcpy(interbuff, rbuffer+last_start, sizeof(uint8_t) * len);
+            cargs->user_connection_handler(cargs->connfd, cargs->addr, sizeof(cargs->addr), interbuff, len);
+            free(interbuff);
+        }
     }
 
     EXIT_HANDLE:
+    printf("Leaving handler loop\n");
     if (pbuffer) free(pbuffer);
     if (rbuffer) free(rbuffer);
 }
@@ -191,8 +206,16 @@ void server_listen_and_serve(server_def_t definition) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd < 0) return; // There was an error
     if (definition.options_callback) definition.options_callback(sockfd);
-    if (bind(sockfd, (struct sockaddr*)&definition.address, sizeof(definition.address))) return;
-    if (listen(sockfd, definition.backlog)) return;
+    if (bind(sockfd, (struct sockaddr*)&definition.address, sizeof(definition.address))) {
+        printf("Failed to bind to port\n");
+        return;
+    }
+    if (listen(sockfd, definition.backlog)) {
+        printf("Failed to start listening\n");
+        return;
+    }
+
+    printf("Listening on: %d\n", ntohs(definition.address.sin_port));
 
     // Begin the loop
     for (;;) {
@@ -201,7 +224,11 @@ void server_listen_and_serve(server_def_t definition) {
         socklen_t* caddr_len = malloc(sizeof(socklen_t));
         if (!caddr_len) return;
         int csock = accept(sockfd, (struct sockaddr*)caddr, caddr_len);
-        if (csock < 0) return;
+        if (csock < 0) {
+            printf("Failed to accept socket\n");
+            return;
+        }
+
         connection_handler_args_t* cargs = malloc(sizeof(connection_handler_args_t));
         if (!cargs) return;
         *cargs = (connection_handler_args_t){csock, (struct sockaddr*)caddr, caddr_len, definition.buffer_size, definition.connection_handler};
@@ -210,7 +237,8 @@ void server_listen_and_serve(server_def_t definition) {
         int cret;
 
         cret = pthread_create(&cthread, NULL, connection_handler, (void*)cargs);
-        if (!cret) {
+        if (cret) {
+            printf("Failed to create pthread handler\n");
             errno = cret;
             return;
         }
