@@ -242,7 +242,7 @@ void server_listen_and_serve(server_def_t definition) {
             errno = cret;
             return;
         }
-        if(definition.thread_handler) definition.thread_handler(cthread);
+        if(definition.thread_handler) definition.thread_handler(cthread, csock, (struct sockaddr*)caddr, caddr_len);
     }
 }
 

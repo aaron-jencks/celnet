@@ -50,7 +50,7 @@ typedef struct {
      * and the length of the character data read in.
     */
     void (*connection_handler)(int, sockaddr_t*, socklen_t, char*, size_t);
-    void (*thread_handler)(pthread_t);                              // Will be called whenever a thread is launched successfully
+    void (*thread_handler)(pthread_t, int, sockaddr_t*, socklen_t); // Will be called whenever a thread is launched successfully
 } server_def_t;
 
 /**
