@@ -75,7 +75,7 @@ void* connection_handler(void* args) {
         // Get some data
         ssize_t rbuff = recv(cargs->connfd, (void*)rbuffer, sizeof(uint8_t)*cargs->buffer_size, 0);
         if (rbuff < 0) break;
-        if (!rbuff) continue;
+        if (!rbuff) break;
 
         // handle if we were waiting for more data from the client
         // for a command
@@ -219,11 +219,11 @@ void server_listen_and_serve(server_def_t definition) {
 
     // Begin the loop
     for (;;) {
-        struct sockaddr_in* caddr = malloc(sizeof(struct sockaddr_in));
+        struct sockaddr_in* caddr = calloc(1, sizeof(struct sockaddr_in));
         if (!caddr) return;
-        socklen_t* caddr_len = malloc(sizeof(socklen_t));
+        socklen_t caddr_len = sizeof(caddr);
         if (!caddr_len) return;
-        int csock = accept(sockfd, (struct sockaddr*)caddr, caddr_len);
+        int csock = accept(sockfd, (struct sockaddr*)caddr, &caddr_len);
         if (csock < 0) {
             printf("Failed to accept socket\n");
             return;
@@ -231,7 +231,7 @@ void server_listen_and_serve(server_def_t definition) {
 
         connection_handler_args_t* cargs = malloc(sizeof(connection_handler_args_t));
         if (!cargs) return;
-        *cargs = (connection_handler_args_t){csock, (struct sockaddr*)caddr, caddr_len, definition.buffer_size, definition.connection_handler};
+        *cargs = (connection_handler_args_t){csock, (struct sockaddr_in*)caddr, &caddr_len, definition.buffer_size, definition.connection_handler};
 
         pthread_t cthread;
         int cret;
@@ -242,7 +242,7 @@ void server_listen_and_serve(server_def_t definition) {
             errno = cret;
             return;
         }
-        if(definition.thread_handler) definition.thread_handler(cthread, csock, (struct sockaddr*)caddr, caddr_len);
+        if(definition.thread_handler) definition.thread_handler(cthread, csock, (struct sockaddr_in*)caddr, caddr_len);
     }
 }
 
